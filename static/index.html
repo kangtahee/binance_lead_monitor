@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Binance Spot vs Perp Lead Monitor</title>
+  <title>Strict TT Lead Monitor</title>
   <style>
     :root {
       --bg: #0d1117;
@@ -12,15 +12,15 @@
       --line: #253246;
       --text: #e6edf3;
       --muted: #8b949e;
-      --spot: #f59e0b;
-      --perp: #38bdf8;
+      --bn-spot: #f59e0b;
+      --bn-perp: #38bdf8;
+      --okx-spot: #22c55e;
+      --okx-perp: #f43f5e;
       --green: #20c997;
       --red: #ff5c7a;
     }
 
-    * {
-      box-sizing: border-box;
-    }
+    * { box-sizing: border-box; }
 
     body {
       margin: 0;
@@ -33,9 +33,18 @@
     .app {
       height: 100vh;
       display: grid;
-      grid-template-rows: auto 1fr;
+      grid-template-rows: auto minmax(320px, 1fr) 270px;
       padding: 14px;
       gap: 12px;
+    }
+
+    .toolbar,
+    .chart-shell,
+    .events {
+      background: rgba(21, 27, 35, 0.94);
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      box-shadow: 0 18px 50px rgba(0, 0, 0, 0.25);
     }
 
     .toolbar {
@@ -43,11 +52,7 @@
       align-items: center;
       justify-content: space-between;
       gap: 12px;
-      background: rgba(21, 27, 35, 0.92);
-      border: 1px solid var(--line);
-      border-radius: 16px;
       padding: 12px;
-      box-shadow: 0 18px 50px rgba(0, 0, 0, 0.25);
     }
 
     .left,
@@ -75,9 +80,7 @@
       outline: none;
     }
 
-    button {
-      cursor: pointer;
-    }
+    button { cursor: pointer; }
 
     button.active {
       border-color: var(--green);
@@ -86,7 +89,7 @@
     }
 
     .stat {
-      min-width: 128px;
+      min-width: 132px;
       padding: 7px 10px;
       background: var(--panel-2);
       border: 1px solid var(--line);
@@ -110,11 +113,7 @@
     .chart-shell {
       min-height: 0;
       position: relative;
-      background: linear-gradient(180deg, rgba(21, 27, 35, 0.96), rgba(12, 17, 25, 0.98));
-      border: 1px solid var(--line);
-      border-radius: 18px;
       overflow: hidden;
-      box-shadow: 0 24px 60px rgba(0, 0, 0, 0.34);
     }
 
     canvas {
@@ -124,16 +123,15 @@
       cursor: crosshair;
     }
 
-    canvas.dragging {
-      cursor: grabbing;
-    }
+    canvas.dragging { cursor: grabbing; }
 
     .legend {
       position: absolute;
       left: 18px;
       top: 16px;
       display: flex;
-      gap: 12px;
+      flex-wrap: wrap;
+      gap: 10px;
       padding: 8px 10px;
       background: rgba(13, 17, 23, 0.72);
       border: 1px solid rgba(255, 255, 255, 0.08);
@@ -155,13 +153,10 @@
       display: inline-block;
     }
 
-    .spot {
-      background: var(--spot);
-    }
-
-    .perp {
-      background: var(--perp);
-    }
+    .bn-spot { background: var(--bn-spot); }
+    .bn-perp { background: var(--bn-perp); }
+    .okx-spot { background: var(--okx-spot); }
+    .okx-perp { background: var(--okx-perp); }
 
     .hint {
       position: absolute;
@@ -179,7 +174,7 @@
     .tooltip {
       position: absolute;
       display: none;
-      min-width: 210px;
+      min-width: 250px;
       background: rgba(13, 17, 23, 0.94);
       border: 1px solid rgba(255, 255, 255, 0.12);
       border-radius: 12px;
@@ -191,23 +186,98 @@
       box-shadow: 0 18px 40px rgba(0, 0, 0, 0.35);
     }
 
-    @media (max-width: 900px) {
-      body {
-        overflow: auto;
-      }
+    .events {
+      min-height: 0;
+      overflow: hidden;
+      display: grid;
+      grid-template-rows: auto 1fr;
+    }
 
+    .events-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 12px;
+      padding: 12px 14px;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .events-title {
+      font-weight: 800;
+    }
+
+    .events-note {
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .table-wrap {
+      overflow: auto;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 12px;
+    }
+
+    th,
+    td {
+      padding: 8px 10px;
+      border-bottom: 1px solid rgba(37, 50, 70, 0.72);
+      text-align: left;
+      white-space: nowrap;
+      vertical-align: top;
+    }
+
+    th {
+      position: sticky;
+      top: 0;
+      z-index: 1;
+      color: var(--muted);
+      background: #121922;
+      font-weight: 700;
+    }
+
+    tr:first-child td {
+      background: rgba(32, 201, 151, 0.06);
+    }
+
+    .first {
+      color: var(--green);
+      font-weight: 800;
+    }
+
+    .empty {
+      color: #59636f;
+    }
+
+    .up { color: var(--green); font-weight: 800; }
+    .down { color: var(--red); font-weight: 800; }
+
+    .trigger-cell {
+      line-height: 1.42;
+    }
+
+    .lag {
+      color: var(--green);
+      font-weight: 800;
+    }
+
+    .detail {
+      color: var(--muted);
+    }
+
+    @media (max-width: 900px) {
+      body { overflow: auto; }
       .app {
         height: 100svh;
         padding: 8px;
+        grid-template-rows: auto 520px 320px;
       }
-
       .toolbar {
         align-items: flex-start;
         flex-direction: column;
-      }
-
-      .chart-shell {
-        min-height: 520px;
       }
     }
   </style>
@@ -216,7 +286,7 @@
   <main class="app">
     <section class="toolbar">
       <div class="left">
-        <div class="title">Binance Spot / Perp</div>
+        <div class="title">Strict TT Lead Monitor</div>
         <select id="symbolSelect"></select>
         <select id="timeMode">
           <option value="receive">Receive time</option>
@@ -230,20 +300,16 @@
       </div>
       <div class="right">
         <div class="stat">
-          <div class="label">Spot</div>
-          <div class="value" id="spotStat">--</div>
+          <div class="label">Polymarket</div>
+          <div class="value" id="polyStat">--</div>
         </div>
         <div class="stat">
-          <div class="label">Perp</div>
-          <div class="value" id="perpStat">--</div>
+          <div class="label">First TT</div>
+          <div class="value" id="firstStat">--</div>
         </div>
         <div class="stat">
-          <div class="label">Spread</div>
-          <div class="value" id="spreadStat">--</div>
-        </div>
-        <div class="stat">
-          <div class="label">Last move</div>
-          <div class="value" id="moveStat">--</div>
+          <div class="label">Invalid</div>
+          <div class="value" id="invalidStat">--</div>
         </div>
       </div>
     </section>
@@ -251,16 +317,57 @@
     <section class="chart-shell">
       <canvas id="chart"></canvas>
       <div class="legend">
-        <span><i class="dot spot"></i>Spot last trade</span>
-        <span><i class="dot perp"></i>Perp last trade</span>
+        <span><i class="dot bn-spot"></i>Binance Spot</span>
+        <span><i class="dot bn-perp"></i>Binance Perp</span>
+        <span><i class="dot okx-spot"></i>OKX Spot</span>
+        <span><i class="dot okx-perp"></i>OKX Perp</span>
       </div>
       <div class="hint">Drag to pan. Wheel to zoom. Double click for live.</div>
       <div class="tooltip" id="tooltip"></div>
+    </section>
+
+    <section class="events">
+      <div class="events-header">
+        <div class="events-title">TT Event Groups</div>
+        <div class="events-note">First source opens a 1s window. Other sources are filled only if strict TT triggers inside the window.</div>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>#</th>
+              <th>Asset</th>
+              <th>Dir</th>
+              <th>First</th>
+              <th>First Time</th>
+              <th>Binance Spot</th>
+              <th>Binance Perp</th>
+              <th>OKX Spot</th>
+              <th>OKX Perp</th>
+            </tr>
+          </thead>
+          <tbody id="eventsBody"></tbody>
+        </table>
+      </div>
     </section>
   </main>
 
   <script>
     const MAX_POINTS = 80000;
+    const VENUES = ["binance_spot", "binance_perp", "okx_spot", "okx_perp"];
+    const VENUE_LABELS = {
+      binance_spot: "Binance Spot",
+      binance_perp: "Binance Perp",
+      okx_spot: "OKX Spot",
+      okx_perp: "OKX Perp",
+    };
+    const COLORS = {
+      binance_spot: "#f59e0b",
+      binance_perp: "#38bdf8",
+      okx_spot: "#22c55e",
+      okx_perp: "#f43f5e",
+    };
+
     const state = {
       symbols: [],
       selectedSymbol: null,
@@ -270,6 +377,9 @@
       viewStart: 0,
       viewEnd: 0,
       series: new Map(),
+      polymarket: new Map(),
+      events: [],
+      invalidCounts: {},
       latestMove: new Map(),
       mouse: null,
       dragging: false,
@@ -283,33 +393,26 @@
       chartDpr: 0,
     };
 
-    const COLORS = {
-      spot: "#f59e0b",
-      perp: "#38bdf8",
-    };
-
     const canvas = document.getElementById("chart");
     const ctx = canvas.getContext("2d");
     const tooltip = document.getElementById("tooltip");
     const symbolSelect = document.getElementById("symbolSelect");
     const timeModeSelect = document.getElementById("timeMode");
     const liveBtn = document.getElementById("liveBtn");
-    const spotStat = document.getElementById("spotStat");
-    const perpStat = document.getElementById("perpStat");
-    const spreadStat = document.getElementById("spreadStat");
-    const moveStat = document.getElementById("moveStat");
+    const polyStat = document.getElementById("polyStat");
+    const firstStat = document.getElementById("firstStat");
+    const invalidStat = document.getElementById("invalidStat");
+    const eventsBody = document.getElementById("eventsBody");
 
     function ensureSymbol(symbol) {
       if (!state.series.has(symbol)) {
-        state.series.set(symbol, {
-          spot: [],
-          perp: [],
-          versions: { spot: 0, perp: 0 },
-          sorted: {
-            spot: { exchangeVersion: -1, exchange: [] },
-            perp: { exchangeVersion: -1, exchange: [] },
-          },
-        });
+        const bucket = { versions: {}, sorted: {} };
+        for (const venue of VENUES) {
+          bucket[venue] = [];
+          bucket.versions[venue] = 0;
+          bucket.sorted[venue] = { exchangeVersion: -1, exchange: [] };
+        }
+        state.series.set(symbol, bucket);
       }
       if (!state.symbols.includes(symbol)) {
         state.symbols.push(symbol);
@@ -331,24 +434,18 @@
         option.textContent = symbol.replace("USDT", "");
         symbolSelect.appendChild(option);
       }
-      if (current) {
-        symbolSelect.value = current;
-      }
-    }
-
-    function pointTime(point) {
-      return state.timeMode === "exchange" ? point.exchangeTradeTimeMs : point.receiveTimeMs;
+      if (current) symbolSelect.value = current;
     }
 
     function addTick(tick) {
       ensureSymbol(tick.symbol);
       const bucket = state.series.get(tick.symbol);
+      if (!bucket || !VENUES.includes(tick.venue)) return;
       const venueSeries = bucket[tick.venue];
       const prev = venueSeries.length ? venueSeries[venueSeries.length - 1] : null;
       const price = Number(tick.price);
-      if (!Number.isFinite(price) || price <= 0) {
-        console.warn("invalid incoming trade price", tick);
-      }
+      if (!Number.isFinite(price) || price <= 0) return;
+
       const point = {
         price,
         rawPrice: tick.raw_price,
@@ -360,6 +457,7 @@
         delayMs: tick.exchange_to_receive_ms,
         tradeId: tick.trade_id,
         stream: tick.stream,
+        venue: tick.venue,
         clientArriveMs: Date.now(),
       };
 
@@ -380,10 +478,21 @@
       }
     }
 
+    function addPolymarket(asset, data) {
+      state.polymarket.set(asset, data);
+    }
+
+    function upsertEvent(event) {
+      const idx = state.events.findIndex((item) => item.id === event.id);
+      if (idx >= 0) state.events[idx] = event;
+      else state.events.push(event);
+      state.events.sort((a, b) => b.first_receive_time_ms - a.first_receive_time_ms);
+      if (state.events.length > 200) state.events.length = 200;
+      renderEvents();
+    }
+
     function connectWs() {
-      if (state.ws) {
-        state.ws.close();
-      }
+      if (state.ws) state.ws.close();
       const protocol = location.protocol === "https:" ? "wss:" : "ws:";
       const ws = new WebSocket(`${protocol}//${location.host}/ws`);
       state.ws = ws;
@@ -391,20 +500,29 @@
       ws.onmessage = (event) => {
         const msg = JSON.parse(event.data);
         if (msg.type === "init") {
-          for (const symbol of msg.symbols || []) {
-            ensureSymbol(symbol);
-          }
+          for (const symbol of msg.symbols || []) ensureSymbol(symbol);
           if (msg.latest) {
-            for (const [symbol, latest] of Object.entries(msg.latest)) {
-              if (latest.spot) addTick(latest.spot);
-              if (latest.perp) addTick(latest.perp);
+            for (const latest of Object.values(msg.latest)) {
+              for (const venue of VENUES) {
+                if (latest[venue]) addTick(latest[venue]);
+              }
             }
           }
+          if (msg.polymarket) {
+            for (const [asset, data] of Object.entries(msg.polymarket)) addPolymarket(asset, data);
+          }
+          state.events = (msg.tt_events || []).slice().sort((a, b) => b.first_receive_time_ms - a.first_receive_time_ms);
+          state.invalidCounts = msg.invalid_counts || {};
+          renderEvents();
           return;
         }
-        if (msg.type === "trade") {
-          addTick(msg);
+        if (msg.type === "trade") addTick(msg);
+        if (msg.type === "invalid_tick") {
+          const key = `${msg.asset}:${msg.venue}:${msg.reason}`;
+          state.invalidCounts[key] = (state.invalidCounts[key] || 0) + 1;
         }
+        if (msg.type === "polymarket") addPolymarket(msg.asset, msg.data);
+        if (msg.type === "tt_event") upsertEvent(msg.event);
       };
 
       ws.onclose = () => {
@@ -429,11 +547,14 @@
       state.chartDpr = dpr;
     }
 
+    function pointTime(point) {
+      return state.timeMode === "exchange" ? point.exchangeTradeTimeMs : point.receiveTimeMs;
+    }
+
     function getVisibleData() {
-      return {
-        spot: visibleRange("spot"),
-        perp: visibleRange("perp"),
-      };
+      const out = {};
+      for (const venue of VENUES) out[venue] = visibleRange(venue);
+      return out;
     }
 
     function visibleRange(venue) {
@@ -446,8 +567,7 @@
     function getSeriesInTimeOrder(venue) {
       const bucket = state.series.get(state.selectedSymbol);
       if (!bucket) return [];
-      if (state.timeMode === "receive") return bucket[venue];
-
+      if (state.timeMode === "receive") return bucket[venue] || [];
       const cache = bucket.sorted[venue];
       const version = bucket.versions[venue];
       if (cache.exchangeVersion !== version) {
@@ -462,8 +582,7 @@
     }
 
     function lowerBoundTime(points, target) {
-      let lo = 0;
-      let hi = points.length;
+      let lo = 0, hi = points.length;
       while (lo < hi) {
         const mid = (lo + hi) >> 1;
         if (pointTime(points[mid]) < target) lo = mid + 1;
@@ -473,8 +592,7 @@
     }
 
     function upperBoundTime(points, target) {
-      let lo = 0;
-      let hi = points.length;
+      let lo = 0, hi = points.length;
       while (lo < hi) {
         const mid = (lo + hi) >> 1;
         if (pointTime(points[mid]) <= target) lo = mid + 1;
@@ -496,11 +614,13 @@
 
     function getLatestAnchorPoint() {
       const latest = getLatestPrices();
-      const spotTime = latest.spot ? pointTime(latest.spot) : 0;
-      const perpTime = latest.perp ? pointTime(latest.perp) : 0;
-      if (!latest.spot) return latest.perp;
-      if (!latest.perp) return latest.spot;
-      return spotTime >= perpTime ? latest.spot : latest.perp;
+      let best = null;
+      for (const venue of VENUES) {
+        const point = latest[venue];
+        if (!point) continue;
+        if (!best || pointTime(point) > pointTime(best)) best = point;
+      }
+      return best;
     }
 
     function draw() {
@@ -511,22 +631,19 @@
       const height = state.chartHeight || canvas.clientHeight;
       ctx.clearRect(0, 0, width, height);
 
-      const pad = { left: 72, right: 84, top: 44, bottom: 38 };
+      const pad = { left: 72, right: 92, top: 48, bottom: 38 };
       const plotW = Math.max(1, width - pad.left - pad.right);
       const plotH = Math.max(1, height - pad.top - pad.bottom);
 
       ctx.fillStyle = "#0d1117";
       ctx.fillRect(0, 0, width, height);
       ctx.fillStyle = "rgba(255,255,255,0.018)";
-      for (let x = -height; x < width; x += 34) {
-        ctx.fillRect(x, 0, 1, height);
-      }
+      for (let x = -height; x < width; x += 34) ctx.fillRect(x, 0, 1, height);
 
       const data = getVisibleData();
       const latestPrices = getLatestPrices();
       const bounds = priceBounds(data, latestPrices);
-      let minP = bounds.min;
-      let maxP = bounds.max;
+      let minP = bounds.min, maxP = bounds.max;
       if (minP === maxP) {
         minP -= minP * 0.0005 || 1;
         maxP += maxP * 0.0005 || 1;
@@ -539,10 +656,8 @@
       const yFor = (price) => pad.top + ((maxP - price) / (maxP - minP)) * plotH;
 
       drawGrid(width, height, pad, plotW, plotH, minP, maxP);
-      drawSeries(data.spot, xFor, yFor, COLORS.spot);
-      drawSeries(data.perp, xFor, yFor, COLORS.perp);
-      drawLatestPrice(latestPrices.spot, xFor, yFor, COLORS.spot, "SPOT");
-      drawLatestPrice(latestPrices.perp, xFor, yFor, COLORS.perp, "PERP");
+      for (const venue of VENUES) drawSeries(data[venue], xFor, yFor, COLORS[venue]);
+      for (const venue of VENUES) drawLatestPrice(latestPrices[venue], yFor, COLORS[venue], labelCompact(venue));
       drawCrosshair(xFor, yFor, data, minP, maxP, pad, plotW, plotH);
       if (performance.now() - state.lastStatsUpdate > 100) {
         updateStats(latestPrices);
@@ -553,34 +668,23 @@
     }
 
     function priceBounds(data, latestPrices) {
-      let min = Infinity;
-      let max = -Infinity;
-      scanRange(data.spot, (point) => {
-        if (point.price < min) min = point.price;
-        if (point.price > max) max = point.price;
-      });
-      scanRange(data.perp, (point) => {
-        if (point.price < min) min = point.price;
-        if (point.price > max) max = point.price;
-      });
-      if (latestPrices.spot) {
-        min = Math.min(min, latestPrices.spot.price);
-        max = Math.max(max, latestPrices.spot.price);
+      let min = Infinity, max = -Infinity;
+      for (const venue of VENUES) {
+        scanRange(data[venue], (point) => {
+          min = Math.min(min, point.price);
+          max = Math.max(max, point.price);
+        });
+        if (latestPrices[venue]) {
+          min = Math.min(min, latestPrices[venue].price);
+          max = Math.max(max, latestPrices[venue].price);
+        }
       }
-      if (latestPrices.perp) {
-        min = Math.min(min, latestPrices.perp.price);
-        max = Math.max(max, latestPrices.perp.price);
-      }
-      if (!Number.isFinite(min) || !Number.isFinite(max)) {
-        return { min: 0, max: 1 };
-      }
+      if (!Number.isFinite(min) || !Number.isFinite(max)) return { min: 0, max: 1 };
       return { min, max };
     }
 
     function scanRange(range, visitor) {
-      for (let i = range.start; i < range.end; i++) {
-        visitor(range.points[i]);
-      }
+      for (let i = range.start; i < range.end; i++) visitor(range.points[i]);
     }
 
     function drawGrid(width, height, pad, plotW, plotH, minP, maxP) {
@@ -607,8 +711,7 @@
         ctx.lineTo(x, height - pad.bottom);
         ctx.stroke();
         const ts = state.viewStart + ((state.viewEnd - state.viewStart) * i) / 8;
-        const label = formatTime(ts);
-        ctx.fillText(label, x - 28, height - 14);
+        ctx.fillText(formatTime(ts), x - 28, height - 14);
       }
 
       ctx.strokeStyle = "rgba(139, 148, 158, 0.34)";
@@ -621,14 +724,13 @@
       if (count <= 0) return;
       ctx.save();
       ctx.strokeStyle = color;
-      ctx.lineWidth = 1.6;
+      ctx.lineWidth = 1.45;
       ctx.beginPath();
 
       const decimated = count > 2500 ? decimate(range, xFor) : null;
       const drawable = decimated || range.points;
       const start = decimated ? 0 : range.start;
       const end = decimated ? decimated.length : range.end;
-
       for (let i = start; i < end; i++) {
         const p = drawable[i];
         const x = xFor(pointTime(p));
@@ -637,7 +739,6 @@
         else ctx.lineTo(x, y);
       }
       ctx.stroke();
-
       const last = range.points[range.end - 1];
       ctx.fillStyle = color;
       ctx.beginPath();
@@ -648,10 +749,7 @@
 
     function decimate(range, xFor) {
       const out = [];
-      let currentX = null;
-      let first = null;
-      let last = null;
-
+      let currentX = null, first = null, last = null;
       for (let i = range.start; i < range.end; i++) {
         const point = range.points[i];
         const x = Math.floor(xFor(pointTime(point)));
@@ -667,7 +765,6 @@
           last = point;
         }
       }
-
       if (first) {
         out.push(first);
         if (last !== first) out.push(last);
@@ -675,25 +772,27 @@
       return out;
     }
 
-    function drawLatestPrice(point, xFor, yFor, color, label) {
+    function drawLatestPrice(point, yFor, color, label) {
       if (!point) return;
       const y = yFor(point.price);
       const width = canvas.getBoundingClientRect().width;
       ctx.save();
       ctx.strokeStyle = color;
-      ctx.globalAlpha = 0.42;
+      ctx.globalAlpha = 0.32;
       ctx.setLineDash([4, 4]);
       ctx.beginPath();
       ctx.moveTo(72, y);
-      ctx.lineTo(width - 84, y);
+      ctx.lineTo(width - 92, y);
       ctx.stroke();
       ctx.setLineDash([]);
       ctx.globalAlpha = 1;
       ctx.fillStyle = color;
-      ctx.fillRect(width - 76, y - 11, 66, 22);
+      const text = `${label} ${formatPrice(point.price)}`;
+      ctx.font = "700 10px Segoe UI, sans-serif";
+      const textW = Math.ceil(ctx.measureText(text).width) + 8;
+      ctx.fillRect(width - textW - 10, y - 10, textW, 20);
       ctx.fillStyle = "#071018";
-      ctx.font = "700 11px Segoe UI, sans-serif";
-      ctx.fillText(`${label} ${formatPrice(point.price)}`, width - 72, y + 4);
+      ctx.fillText(text, width - textW - 6, y + 4);
       ctx.restore();
     }
 
@@ -709,9 +808,6 @@
       }
 
       const t = state.viewStart + ((x - pad.left) / plotW) * (state.viewEnd - state.viewStart);
-      const spot = nearestPoint(data.spot, t);
-      const perp = nearestPoint(data.perp, t);
-
       ctx.save();
       ctx.strokeStyle = "rgba(230, 237, 243, 0.28)";
       ctx.lineWidth = 1;
@@ -724,28 +820,23 @@
       ctx.restore();
 
       const priceAtY = maxP - ((y - pad.top) / plotH) * (maxP - minP);
-      const lines = [
-        `<b>${formatDateTime(t)}</b>`,
-        `Y ${formatPrice(priceAtY)}`,
-      ];
-      if (spot) lines.push(`<span style="color:${COLORS.spot}">Spot</span> ${formatPrice(spot.price)} delay ${spot.delayMs}ms`);
-      if (perp) lines.push(`<span style="color:${COLORS.perp}">Perp</span> ${formatPrice(perp.price)} delay ${perp.delayMs}ms`);
-      if (spot && perp) {
-        const lead = spot.receiveTimeMs - perp.receiveTimeMs;
-        if (Math.abs(lead) <= 1000) {
-          lines.push(lead > 0 ? `Perp earlier by ${lead}ms` : `Spot earlier by ${Math.abs(lead)}ms`);
+      const lines = [`<b>${formatDateTime(t)}</b>`, `Y ${formatPrice(priceAtY)}`];
+      for (const venue of VENUES) {
+        const point = nearestPoint(data[venue], t);
+        if (point) {
+          lines.push(`<span style="color:${COLORS[venue]}">${VENUE_LABELS[venue]}</span> ${formatPrice(point.price)} delay ${point.delayMs}ms`);
         }
       }
+
       tooltip.innerHTML = lines.join("<br>");
       tooltip.style.display = "block";
-      tooltip.style.left = `${Math.min(x + 18, window.innerWidth - 260)}px`;
+      tooltip.style.left = `${Math.min(x + 18, window.innerWidth - 300)}px`;
       tooltip.style.top = `${Math.max(12, y + 18)}px`;
     }
 
     function nearestPoint(range, targetTime) {
       if (range.end <= range.start) return null;
-      let lo = range.start;
-      let hi = range.end - 1;
+      let lo = range.start, hi = range.end - 1;
       while (lo < hi) {
         const mid = (lo + hi) >> 1;
         if (pointTime(range.points[mid]) < targetTime) lo = mid + 1;
@@ -758,32 +849,64 @@
     }
 
     function getLatestPrices() {
-      const bucket = state.series.get(state.selectedSymbol) || { spot: [], perp: [] };
-      return {
-        spot: bucket.spot[bucket.spot.length - 1] || null,
-        perp: bucket.perp[bucket.perp.length - 1] || null,
-      };
+      const bucket = state.series.get(state.selectedSymbol);
+      const latest = {};
+      for (const venue of VENUES) {
+        const arr = bucket ? bucket[venue] : [];
+        latest[venue] = arr && arr.length ? arr[arr.length - 1] : null;
+      }
+      return latest;
     }
 
-    function updateStats(latest) {
-      spotStat.textContent = latest.spot ? `${formatPrice(latest.spot.price)}  ${latest.spot.delayMs}ms` : "--";
-      perpStat.textContent = latest.perp ? `${formatPrice(latest.perp.price)}  ${latest.perp.delayMs}ms raw=${latest.perp.rawPrice ?? "?"}` : "--";
-      if (latest.spot && latest.perp) {
-        const spread = latest.perp.price - latest.spot.price;
-        const bps = (spread / latest.spot.price) * 10000;
-        spreadStat.textContent = `${spread >= 0 ? "+" : ""}${spread.toFixed(2)} (${bps.toFixed(1)} bps)`;
-      } else {
-        spreadStat.textContent = "--";
-      }
+    function updateStats() {
+      const asset = selectedAsset();
+      const pm = state.polymarket.get(asset);
+      polyStat.textContent = pm ? `UP ${(pm.up_price * 100).toFixed(1)}c / DOWN ${(pm.down_price * 100).toFixed(1)}c` : "--";
+      const first = state.events.find((event) => event.asset === asset);
+      firstStat.textContent = first ? `${first.first_venue_label} ${first.direction} ${formatTime(first.first_receive_time_ms)}` : "--";
+      const invalidTotal = Object.values(state.invalidCounts).reduce((sum, value) => sum + Number(value || 0), 0);
+      invalidStat.textContent = invalidTotal ? String(invalidTotal) : "--";
+    }
 
-      const move = state.latestMove.get(state.selectedSymbol);
-      if (move) {
-        const age = Date.now() - move.time;
-        const sign = move.delta > 0 ? "+" : "";
-        moveStat.textContent = `${move.venue.toUpperCase()} ${sign}${move.delta.toFixed(2)} raw=${move.rawPrice ?? "?"} ${age}ms ago`;
-      } else {
-        moveStat.textContent = "--";
-      }
+    function renderEvents() {
+      const rows = state.events.slice(0, 80).map((event) => {
+        const directionClass = event.direction === "UP" ? "up" : "down";
+        return `
+          <tr>
+            <td>${event.id}</td>
+            <td>${event.asset}</td>
+            <td class="${directionClass}">${event.direction}</td>
+            <td class="first">${event.first_venue_label}</td>
+            <td>${formatDateTime(event.first_receive_time_ms)}</td>
+            ${VENUES.map((venue) => renderTriggerCell(event, venue)).join("")}
+          </tr>
+        `;
+      });
+      eventsBody.innerHTML = rows.join("") || `<tr><td colspan="9" class="empty">No TT events yet</td></tr>`;
+    }
+
+    function renderTriggerCell(event, venue) {
+      const trigger = event.triggers ? event.triggers[venue] : null;
+      if (!trigger) return `<td class="empty">--</td>`;
+      const lag = trigger.lag_ms === 0 ? "FIRST" : `+${trigger.lag_ms}ms`;
+      return `
+        <td class="trigger-cell">
+          <span class="lag">${lag}</span> ${formatTime(trigger.receive_time_ms)}
+          <div class="detail">px ${formatPrice(trigger.price)} spread ${trigger.spread_cents.toFixed(1)}c</div>
+          <div class="detail">real ${trigger.real_price_cents.toFixed(1)}c theory ${trigger.theory_price_cents.toFixed(1)}c</div>
+        </td>
+      `;
+    }
+
+    function selectedAsset() {
+      return (state.selectedSymbol || "BTCUSDT").replace("USDT", "");
+    }
+
+    function labelCompact(venue) {
+      if (venue === "binance_spot") return "BNS";
+      if (venue === "binance_perp") return "BNP";
+      if (venue === "okx_spot") return "OKS";
+      return "OKP";
     }
 
     function formatPrice(value) {
@@ -805,10 +928,6 @@
 
     function pad2(value) {
       return String(value).padStart(2, "0");
-    }
-
-    function getCss(name) {
-      return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
     }
 
     symbolSelect.addEventListener("change", () => {
