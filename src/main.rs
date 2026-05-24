@@ -298,6 +298,14 @@ struct TtEventGroup {
     first_receive_time_ms: i64,
     deadline_ms: i64,
     triggers: BTreeMap<String, TtTriggerRecord>,
+    pm_path: Vec<PmPathPoint>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+struct PmPathPoint {
+    time_ms: i64,
+    lag_ms: i64,
+    price_cents: f64,
 }
 
 #[derive(Clone, Debug)]
@@ -1155,6 +1163,10 @@ fn record_tt_trigger(
     let id = shared.next_event_id;
     shared.next_event_id += 1;
     let first_receive_time_ms = trigger.receive_time_ms;
+    let pm_price = match direction {
+        Direction::Up => pm.up_price,
+        Direction::Down => pm.down_price,
+    };
     trigger.lag_ms = 0;
     let mut triggers = BTreeMap::new();
     triggers.insert(venue_key, trigger);
@@ -1168,6 +1180,15 @@ fn record_tt_trigger(
         first_receive_time_ms,
         deadline_ms: first_receive_time_ms + EVENT_WINDOW_MS,
         triggers,
+        pm_path: if pm_price > 0.0 {
+            vec![PmPathPoint {
+                time_ms: first_receive_time_ms,
+                lag_ms: 0,
+                price_cents: pm_price * 100.0,
+            }]
+        } else {
+            Vec::new()
+        },
     };
     shared.tt_events.push(group.clone());
     if shared.tt_events.len() > 200 {
@@ -1554,9 +1575,14 @@ async fn handle_polymarket_message(
     }
 
     if changed {
-        let snapshot = {
-            let shared = shared.read().await;
-            shared.polymarket.get(&asset).cloned()
+        let (snapshot, event_updates) = {
+            let mut shared = shared.write().await;
+            let snapshot = shared.polymarket.get(&asset).cloned();
+            let event_updates = snapshot
+                .as_ref()
+                .map(|snapshot| append_pm_path_updates(&mut shared, asset, snapshot))
+                .unwrap_or_default();
+            (snapshot, event_updates)
         };
         if let Some(snapshot) = snapshot {
             let msg = json!({
@@ -1568,9 +1594,63 @@ async fn handle_polymarket_message(
             .to_string();
             let _ = tx.send(msg);
         }
+        for group in event_updates {
+            let update = json!({
+                "type": "tt_event",
+                "event": group,
+                "server_time_ms": now_ms(),
+            })
+            .to_string();
+            let _ = tx.send(update);
+        }
     }
 
     Ok(())
+}
+
+fn append_pm_path_updates(
+    shared: &mut SharedData,
+    asset: Asset,
+    snapshot: &PolymarketSnapshot,
+) -> Vec<TtEventGroup> {
+    let mut updated = Vec::new();
+    let now = snapshot.receive_time_ms;
+    for group in shared.tt_events.iter_mut().rev() {
+        if group.asset != asset.as_str() {
+            continue;
+        }
+        if now < group.first_receive_time_ms {
+            continue;
+        }
+        if now.saturating_sub(group.first_receive_time_ms) > 2_000 {
+            break;
+        }
+
+        let price = match group.direction {
+            Direction::Up => snapshot.up_price,
+            Direction::Down => snapshot.down_price,
+        };
+        if price <= 0.0 {
+            continue;
+        }
+        let price_cents = price * 100.0;
+        let should_append = group
+            .pm_path
+            .last()
+            .is_none_or(|last| (last.price_cents - price_cents).abs() >= 0.0001);
+        if !should_append {
+            continue;
+        }
+
+        group.pm_path.push(PmPathPoint {
+            time_ms: now,
+            lag_ms: now.saturating_sub(group.first_receive_time_ms),
+            price_cents,
+        });
+        updated.push(group.clone());
+    }
+
+    updated
 }
 
 async fn update_polymarket_asset(

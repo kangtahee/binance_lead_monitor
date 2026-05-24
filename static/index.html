@@ -340,6 +340,7 @@
               <th>Dir</th>
               <th>First</th>
               <th>First Time</th>
+              <th>PM 2s Path</th>
               <th>Binance Spot</th>
               <th>Binance Perp</th>
               <th>OKX Spot</th>
@@ -927,7 +928,7 @@
     }
 
     function renderEvents() {
-      const rows = state.events.slice(0, 80).map((event) => {
+      const rows = state.events.slice(0, 50).map((event) => {
         const directionClass = event.direction === "UP" ? "up" : "down";
         return `
           <tr>
@@ -936,11 +937,36 @@
             <td class="${directionClass}">${event.direction}</td>
             <td class="first">${event.first_venue_label}</td>
             <td>${formatDateTime(event.first_receive_time_ms)}</td>
+            <td>${renderPmPath(event)}</td>
             ${VENUES.map((venue) => renderTriggerCell(event, venue)).join("")}
           </tr>
         `;
       });
-      eventsBody.innerHTML = rows.join("") || `<tr><td colspan="9" class="empty">No TT events yet</td></tr>`;
+      eventsBody.innerHTML = rows.join("") || `<tr><td colspan="10" class="empty">No TT events yet</td></tr>`;
+    }
+
+    function renderPmPath(event) {
+      const path = event.pm_path || [];
+      if (!path.length) return `<span class="empty">--</span>`;
+      const compressed = compressPath(path, 10);
+      return `
+        <div class="trigger-cell">
+          ${compressed.map((point) => `<span>${point.price_cents.toFixed(1)}c</span>`).join(" -> ")}
+          <div class="detail">${path.length} changes / 2s</div>
+        </div>
+      `;
+    }
+
+    function compressPath(path, maxPoints) {
+      if (path.length <= maxPoints) return path;
+      const out = [path[0]];
+      const interior = path.slice(1, -1);
+      const step = Math.ceil(interior.length / (maxPoints - 2));
+      for (let i = 0; i < interior.length && out.length < maxPoints - 1; i += step) {
+        out.push(interior[i]);
+      }
+      out.push(path[path.length - 1]);
+      return out;
     }
 
     function renderTriggerCell(event, venue) {
