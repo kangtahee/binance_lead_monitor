@@ -895,11 +895,13 @@ async fn handle_valid_trade(
     shared: &Arc<RwLock<SharedData>>,
 ) -> Result<()> {
     let mut event_update = None;
+    let broadcast_tick;
 
     {
         let mut shared = shared.write().await;
         let latest_entry = shared.latest.entry(tick.symbol.clone()).or_default();
         let previous_price = latest_price_for_venue(latest_entry, venue);
+        broadcast_tick = previous_price != Some(tick.price);
         log_large_raw_move(venue, previous_price, &tick, raw_text);
         set_latest_for_venue(latest_entry, venue, tick.clone());
 
@@ -939,8 +941,10 @@ async fn handle_valid_trade(
         }
     }
 
-    let msg = serde_json::to_string(&tick).context("encode tick")?;
-    let _ = tx.send(msg);
+    if broadcast_tick {
+        let msg = serde_json::to_string(&tick).context("encode tick")?;
+        let _ = tx.send(msg);
+    }
     if let Some(group) = event_update {
         let update = json!({
             "type": "tt_event",

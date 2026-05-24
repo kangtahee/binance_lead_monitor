@@ -353,7 +353,9 @@
   </main>
 
   <script>
-    const MAX_POINTS = 80000;
+    const MAX_POINTS = 20000;
+    const MAX_BUFFERED_TICKS = 12000;
+    const TARGET_FRAME_MS = 33;
     const VENUES = ["binance_spot", "binance_perp", "okx_spot", "okx_perp"];
     const VENUE_LABELS = {
       binance_spot: "Binance Spot",
@@ -388,6 +390,11 @@
       ws: null,
       reconnectTimer: null,
       lastStatsUpdate: 0,
+      lastDrawAt: 0,
+      eventsDirty: false,
+      tickQueue: [],
+      polyQueue: [],
+      eventQueue: [],
       chartWidth: 0,
       chartHeight: 0,
       chartDpr: 0,
@@ -488,7 +495,7 @@
       else state.events.push(event);
       state.events.sort((a, b) => b.first_receive_time_ms - a.first_receive_time_ms);
       if (state.events.length > 200) state.events.length = 200;
-      renderEvents();
+      state.eventsDirty = true;
     }
 
     function connectWs() {
@@ -516,19 +523,47 @@
           renderEvents();
           return;
         }
-        if (msg.type === "trade") addTick(msg);
+        if (msg.type === "trade") {
+          queueTick(msg);
+        }
         if (msg.type === "invalid_tick") {
           const key = `${msg.asset}:${msg.venue}:${msg.reason}`;
           state.invalidCounts[key] = (state.invalidCounts[key] || 0) + 1;
         }
-        if (msg.type === "polymarket") addPolymarket(msg.asset, msg.data);
-        if (msg.type === "tt_event") upsertEvent(msg.event);
+        if (msg.type === "polymarket") state.polyQueue.push([msg.asset, msg.data]);
+        if (msg.type === "tt_event") state.eventQueue.push(msg.event);
       };
 
       ws.onclose = () => {
         if (state.reconnectTimer) clearTimeout(state.reconnectTimer);
         state.reconnectTimer = setTimeout(connectWs, 1000);
       };
+    }
+
+    function queueTick(tick) {
+      state.tickQueue.push(tick);
+      if (state.tickQueue.length > MAX_BUFFERED_TICKS) {
+        state.tickQueue.splice(0, state.tickQueue.length - MAX_BUFFERED_TICKS);
+      }
+    }
+
+    function flushQueues() {
+      if (state.tickQueue.length) {
+        const ticks = state.tickQueue.splice(0, Math.min(state.tickQueue.length, 5000));
+        for (const tick of ticks) addTick(tick);
+      }
+      if (state.polyQueue.length) {
+        const updates = state.polyQueue.splice(0);
+        for (const [asset, data] of updates) addPolymarket(asset, data);
+      }
+      if (state.eventQueue.length) {
+        const events = state.eventQueue.splice(0);
+        for (const event of events) upsertEvent(event);
+      }
+      if (state.eventsDirty) {
+        state.eventsDirty = false;
+        renderEvents();
+      }
     }
 
     function resizeCanvas() {
@@ -624,6 +659,13 @@
     }
 
     function draw() {
+      flushQueues();
+      const nowFrame = performance.now();
+      if (nowFrame - state.lastDrawAt < TARGET_FRAME_MS) {
+        requestAnimationFrame(draw);
+        return;
+      }
+      state.lastDrawAt = nowFrame;
       resizeCanvas();
       updateView();
 
@@ -735,8 +777,14 @@
         const p = drawable[i];
         const x = xFor(pointTime(p));
         const y = yFor(p.price);
-        if (i === start) ctx.moveTo(x, y);
-        else ctx.lineTo(x, y);
+        if (i === start) {
+          ctx.moveTo(x, y);
+        } else {
+          const prev = drawable[i - 1];
+          const prevY = yFor(prev.price);
+          ctx.lineTo(x, prevY);
+          ctx.lineTo(x, y);
+        }
       }
       ctx.stroke();
       const last = range.points[range.end - 1];
@@ -749,27 +797,37 @@
 
     function decimate(range, xFor) {
       const out = [];
-      let currentX = null, first = null, last = null;
+      let currentX = null, first = null, minPoint = null, maxPoint = null, last = null;
       for (let i = range.start; i < range.end; i++) {
         const point = range.points[i];
         const x = Math.floor(xFor(pointTime(point)));
         if (currentX === null || x !== currentX) {
-          if (first) {
-            out.push(first);
-            if (last !== first) out.push(last);
-          }
+          flushPixelBucket(out, first, minPoint, maxPoint, last);
           currentX = x;
           first = point;
+          minPoint = point;
+          maxPoint = point;
           last = point;
         } else {
+          if (point.price < minPoint.price) minPoint = point;
+          if (point.price > maxPoint.price) maxPoint = point;
           last = point;
         }
       }
-      if (first) {
-        out.push(first);
-        if (last !== first) out.push(last);
-      }
+      flushPixelBucket(out, first, minPoint, maxPoint, last);
       return out;
+    }
+
+    function flushPixelBucket(out, first, minPoint, maxPoint, last) {
+      if (!first) return;
+      const seen = new Set();
+      for (const point of [first, minPoint, maxPoint, last]) {
+        if (!point) continue;
+        const key = `${point.receiveTimeMs}:${point.exchangeTradeTimeMs}:${point.price}:${point.tradeId}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        out.push(point);
+      }
     }
 
     function drawLatestPrice(point, yFor, color, label) {
