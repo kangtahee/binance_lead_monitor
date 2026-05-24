@@ -1,0 +1,777 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Binance Spot vs Perp Lead Monitor</title>
+  <style>
+    :root {
+      --bg: #0d1117;
+      --panel: #151b23;
+      --panel-2: #0f1621;
+      --line: #253246;
+      --text: #e6edf3;
+      --muted: #8b949e;
+      --spot: #f59e0b;
+      --perp: #38bdf8;
+      --green: #20c997;
+      --red: #ff5c7a;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      background: radial-gradient(circle at top left, #182235 0, var(--bg) 36rem);
+      color: var(--text);
+      font-family: "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+      overflow: hidden;
+    }
+
+    .app {
+      height: 100vh;
+      display: grid;
+      grid-template-rows: auto 1fr;
+      padding: 14px;
+      gap: 12px;
+    }
+
+    .toolbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      background: rgba(21, 27, 35, 0.92);
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      padding: 12px;
+      box-shadow: 0 18px 50px rgba(0, 0, 0, 0.25);
+    }
+
+    .left,
+    .right {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+
+    .title {
+      font-weight: 800;
+      letter-spacing: 0.02em;
+      margin-right: 8px;
+    }
+
+    button,
+    select {
+      color: var(--text);
+      background: var(--panel-2);
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      padding: 8px 10px;
+      font-size: 13px;
+      outline: none;
+    }
+
+    button {
+      cursor: pointer;
+    }
+
+    button.active {
+      border-color: var(--green);
+      color: #dffcf5;
+      background: rgba(32, 201, 151, 0.16);
+    }
+
+    .stat {
+      min-width: 128px;
+      padding: 7px 10px;
+      background: var(--panel-2);
+      border: 1px solid var(--line);
+      border-radius: 12px;
+    }
+
+    .stat .label {
+      color: var(--muted);
+      font-size: 11px;
+      line-height: 1.2;
+      text-transform: uppercase;
+    }
+
+    .stat .value {
+      margin-top: 2px;
+      font-size: 14px;
+      font-weight: 700;
+      white-space: nowrap;
+    }
+
+    .chart-shell {
+      min-height: 0;
+      position: relative;
+      background: linear-gradient(180deg, rgba(21, 27, 35, 0.96), rgba(12, 17, 25, 0.98));
+      border: 1px solid var(--line);
+      border-radius: 18px;
+      overflow: hidden;
+      box-shadow: 0 24px 60px rgba(0, 0, 0, 0.34);
+    }
+
+    canvas {
+      width: 100%;
+      height: 100%;
+      display: block;
+      cursor: crosshair;
+    }
+
+    canvas.dragging {
+      cursor: grabbing;
+    }
+
+    .legend {
+      position: absolute;
+      left: 18px;
+      top: 16px;
+      display: flex;
+      gap: 12px;
+      padding: 8px 10px;
+      background: rgba(13, 17, 23, 0.72);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      border-radius: 12px;
+      pointer-events: none;
+      font-size: 13px;
+    }
+
+    .legend span {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .dot {
+      width: 9px;
+      height: 9px;
+      border-radius: 999px;
+      display: inline-block;
+    }
+
+    .spot {
+      background: var(--spot);
+    }
+
+    .perp {
+      background: var(--perp);
+    }
+
+    .hint {
+      position: absolute;
+      right: 18px;
+      bottom: 14px;
+      color: var(--muted);
+      font-size: 12px;
+      background: rgba(13, 17, 23, 0.72);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      border-radius: 12px;
+      padding: 7px 10px;
+      pointer-events: none;
+    }
+
+    .tooltip {
+      position: absolute;
+      display: none;
+      min-width: 210px;
+      background: rgba(13, 17, 23, 0.94);
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      border-radius: 12px;
+      padding: 9px 10px;
+      font-size: 12px;
+      line-height: 1.45;
+      pointer-events: none;
+      white-space: nowrap;
+      box-shadow: 0 18px 40px rgba(0, 0, 0, 0.35);
+    }
+
+    @media (max-width: 900px) {
+      body {
+        overflow: auto;
+      }
+
+      .app {
+        height: 100svh;
+        padding: 8px;
+      }
+
+      .toolbar {
+        align-items: flex-start;
+        flex-direction: column;
+      }
+
+      .chart-shell {
+        min-height: 520px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main class="app">
+    <section class="toolbar">
+      <div class="left">
+        <div class="title">Binance Spot / Perp</div>
+        <select id="symbolSelect"></select>
+        <select id="timeMode">
+          <option value="receive">Receive time</option>
+          <option value="exchange">Exchange trade time</option>
+        </select>
+        <button data-range="10000">10s</button>
+        <button data-range="30000" class="active">30s</button>
+        <button data-range="60000">1m</button>
+        <button data-range="300000">5m</button>
+        <button id="liveBtn" class="active">Live</button>
+      </div>
+      <div class="right">
+        <div class="stat">
+          <div class="label">Spot</div>
+          <div class="value" id="spotStat">--</div>
+        </div>
+        <div class="stat">
+          <div class="label">Perp</div>
+          <div class="value" id="perpStat">--</div>
+        </div>
+        <div class="stat">
+          <div class="label">Spread</div>
+          <div class="value" id="spreadStat">--</div>
+        </div>
+        <div class="stat">
+          <div class="label">Last move</div>
+          <div class="value" id="moveStat">--</div>
+        </div>
+      </div>
+    </section>
+
+    <section class="chart-shell">
+      <canvas id="chart"></canvas>
+      <div class="legend">
+        <span><i class="dot spot"></i>Spot last trade</span>
+        <span><i class="dot perp"></i>Perp last trade</span>
+      </div>
+      <div class="hint">Drag to pan. Wheel to zoom. Double click for live.</div>
+      <div class="tooltip" id="tooltip"></div>
+    </section>
+  </main>
+
+  <script>
+    const MAX_POINTS = 80000;
+    const state = {
+      symbols: [],
+      selectedSymbol: null,
+      timeMode: "receive",
+      rangeMs: 30000,
+      follow: true,
+      viewStart: 0,
+      viewEnd: 0,
+      series: new Map(),
+      latestMove: new Map(),
+      mouse: null,
+      dragging: false,
+      dragStartX: 0,
+      dragStartView: null,
+      ws: null,
+      reconnectTimer: null,
+    };
+
+    const canvas = document.getElementById("chart");
+    const ctx = canvas.getContext("2d");
+    const tooltip = document.getElementById("tooltip");
+    const symbolSelect = document.getElementById("symbolSelect");
+    const timeModeSelect = document.getElementById("timeMode");
+    const liveBtn = document.getElementById("liveBtn");
+    const spotStat = document.getElementById("spotStat");
+    const perpStat = document.getElementById("perpStat");
+    const spreadStat = document.getElementById("spreadStat");
+    const moveStat = document.getElementById("moveStat");
+
+    function ensureSymbol(symbol) {
+      if (!state.series.has(symbol)) {
+        state.series.set(symbol, { spot: [], perp: [] });
+      }
+      if (!state.symbols.includes(symbol)) {
+        state.symbols.push(symbol);
+        state.symbols.sort();
+        renderSymbolOptions();
+      }
+      if (!state.selectedSymbol) {
+        state.selectedSymbol = symbol;
+        symbolSelect.value = symbol;
+      }
+    }
+
+    function renderSymbolOptions() {
+      const current = state.selectedSymbol;
+      symbolSelect.innerHTML = "";
+      for (const symbol of state.symbols) {
+        const option = document.createElement("option");
+        option.value = symbol;
+        option.textContent = symbol.replace("USDT", "");
+        symbolSelect.appendChild(option);
+      }
+      if (current) {
+        symbolSelect.value = current;
+      }
+    }
+
+    function pointTime(point) {
+      return state.timeMode === "exchange" ? point.exchangeTradeTimeMs : point.receiveTimeMs;
+    }
+
+    function addTick(tick) {
+      ensureSymbol(tick.symbol);
+      const bucket = state.series.get(tick.symbol);
+      const venueSeries = bucket[tick.venue];
+      const prev = venueSeries.length ? venueSeries[venueSeries.length - 1] : null;
+      const point = {
+        price: tick.price,
+        quantity: tick.quantity,
+        receiveTimeMs: tick.receive_time_ms,
+        exchangeTradeTimeMs: tick.exchange_trade_time_ms,
+        exchangeEventTimeMs: tick.exchange_event_time_ms,
+        delayMs: tick.exchange_to_receive_ms,
+        tradeId: tick.trade_id,
+      };
+
+      venueSeries.push(point);
+      if (venueSeries.length > MAX_POINTS) {
+        venueSeries.splice(0, venueSeries.length - MAX_POINTS);
+      }
+
+      if (!prev || prev.price !== point.price) {
+        state.latestMove.set(tick.symbol, {
+          venue: tick.venue,
+          price: point.price,
+          time: point.receiveTimeMs,
+          delta: prev ? point.price - prev.price : 0,
+        });
+      }
+    }
+
+    function connectWs() {
+      if (state.ws) {
+        state.ws.close();
+      }
+      const protocol = location.protocol === "https:" ? "wss:" : "ws:";
+      const ws = new WebSocket(`${protocol}//${location.host}/ws`);
+      state.ws = ws;
+
+      ws.onmessage = (event) => {
+        const msg = JSON.parse(event.data);
+        if (msg.type === "init") {
+          for (const symbol of msg.symbols || []) {
+            ensureSymbol(symbol);
+          }
+          if (msg.latest) {
+            for (const [symbol, latest] of Object.entries(msg.latest)) {
+              if (latest.spot) addTick(latest.spot);
+              if (latest.perp) addTick(latest.perp);
+            }
+          }
+          return;
+        }
+        if (msg.type === "trade") {
+          addTick(msg);
+        }
+      };
+
+      ws.onclose = () => {
+        if (state.reconnectTimer) clearTimeout(state.reconnectTimer);
+        state.reconnectTimer = setTimeout(connectWs, 1000);
+      };
+    }
+
+    function resizeCanvas() {
+      const rect = canvas.getBoundingClientRect();
+      const dpr = window.devicePixelRatio || 1;
+      const width = Math.max(1, Math.floor(rect.width * dpr));
+      const height = Math.max(1, Math.floor(rect.height * dpr));
+      if (canvas.width !== width || canvas.height !== height) {
+        canvas.width = width;
+        canvas.height = height;
+      }
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    }
+
+    function getVisibleData() {
+      const bucket = state.series.get(state.selectedSymbol) || { spot: [], perp: [] };
+      const spot = bucket.spot.filter((p) => {
+        const t = pointTime(p);
+        return t >= state.viewStart && t <= state.viewEnd;
+      });
+      const perp = bucket.perp.filter((p) => {
+        const t = pointTime(p);
+        return t >= state.viewStart && t <= state.viewEnd;
+      });
+      return { spot, perp };
+    }
+
+    function updateView() {
+      if (!state.selectedSymbol) return;
+      const bucket = state.series.get(state.selectedSymbol);
+      const all = bucket ? bucket.spot.concat(bucket.perp) : [];
+      const latestPoint = all.reduce((max, point) => Math.max(max, pointTime(point)), 0);
+      const now = latestPoint || Date.now();
+      if (state.follow || state.viewEnd === 0) {
+        state.viewEnd = now;
+        state.viewStart = now - state.rangeMs;
+      }
+    }
+
+    function draw() {
+      resizeCanvas();
+      updateView();
+
+      const rect = canvas.getBoundingClientRect();
+      const width = rect.width;
+      const height = rect.height;
+      ctx.clearRect(0, 0, width, height);
+
+      const pad = { left: 72, right: 84, top: 44, bottom: 38 };
+      const plotW = Math.max(1, width - pad.left - pad.right);
+      const plotH = Math.max(1, height - pad.top - pad.bottom);
+
+      ctx.fillStyle = "#0d1117";
+      ctx.fillRect(0, 0, width, height);
+      ctx.fillStyle = "rgba(255,255,255,0.018)";
+      for (let x = -height; x < width; x += 34) {
+        ctx.fillRect(x, 0, 1, height);
+      }
+
+      const data = getVisibleData();
+      const prices = data.spot.concat(data.perp).map((p) => p.price);
+      const latestPrices = getLatestPrices();
+      if (latestPrices.spot) prices.push(latestPrices.spot.price);
+      if (latestPrices.perp) prices.push(latestPrices.perp.price);
+
+      let minP = prices.length ? Math.min(...prices) : 0;
+      let maxP = prices.length ? Math.max(...prices) : 1;
+      if (minP === maxP) {
+        minP -= minP * 0.0005 || 1;
+        maxP += maxP * 0.0005 || 1;
+      }
+      const yPad = (maxP - minP) * 0.08;
+      minP -= yPad;
+      maxP += yPad;
+
+      const xFor = (time) => pad.left + ((time - state.viewStart) / (state.viewEnd - state.viewStart)) * plotW;
+      const yFor = (price) => pad.top + ((maxP - price) / (maxP - minP)) * plotH;
+
+      drawGrid(width, height, pad, plotW, plotH, minP, maxP);
+      drawSeries(data.spot, xFor, yFor, getCss("--spot"));
+      drawSeries(data.perp, xFor, yFor, getCss("--perp"));
+      drawLatestPrice(latestPrices.spot, xFor, yFor, getCss("--spot"), "SPOT");
+      drawLatestPrice(latestPrices.perp, xFor, yFor, getCss("--perp"), "PERP");
+      drawCrosshair(xFor, yFor, data, minP, maxP, pad, plotW, plotH);
+      updateStats(latestPrices);
+
+      requestAnimationFrame(draw);
+    }
+
+    function drawGrid(width, height, pad, plotW, plotH, minP, maxP) {
+      ctx.save();
+      ctx.strokeStyle = "rgba(139, 148, 158, 0.18)";
+      ctx.lineWidth = 1;
+      ctx.fillStyle = "#8b949e";
+      ctx.font = "12px Segoe UI, sans-serif";
+
+      for (let i = 0; i <= 6; i++) {
+        const y = pad.top + (plotH * i) / 6;
+        ctx.beginPath();
+        ctx.moveTo(pad.left, y);
+        ctx.lineTo(width - pad.right, y);
+        ctx.stroke();
+        const price = maxP - ((maxP - minP) * i) / 6;
+        ctx.fillText(formatPrice(price), width - pad.right + 10, y + 4);
+      }
+
+      for (let i = 0; i <= 8; i++) {
+        const x = pad.left + (plotW * i) / 8;
+        ctx.beginPath();
+        ctx.moveTo(x, pad.top);
+        ctx.lineTo(x, height - pad.bottom);
+        ctx.stroke();
+        const ts = state.viewStart + ((state.viewEnd - state.viewStart) * i) / 8;
+        const label = formatTime(ts);
+        ctx.fillText(label, x - 28, height - 14);
+      }
+
+      ctx.strokeStyle = "rgba(139, 148, 158, 0.34)";
+      ctx.strokeRect(pad.left, pad.top, plotW, plotH);
+      ctx.restore();
+    }
+
+    function drawSeries(points, xFor, yFor, color) {
+      if (!points.length) return;
+      ctx.save();
+      ctx.strokeStyle = color;
+      ctx.lineWidth = 1.6;
+      ctx.beginPath();
+
+      const decimated = decimate(points, xFor);
+      for (let i = 0; i < decimated.length; i++) {
+        const p = decimated[i];
+        const x = xFor(pointTime(p));
+        const y = yFor(p.price);
+        if (i === 0) ctx.moveTo(x, y);
+        else ctx.lineTo(x, y);
+      }
+      ctx.stroke();
+
+      const last = points[points.length - 1];
+      ctx.fillStyle = color;
+      ctx.beginPath();
+      ctx.arc(xFor(pointTime(last)), yFor(last.price), 3, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+    }
+
+    function decimate(points, xFor) {
+      if (points.length < 2500) return points;
+      const buckets = new Map();
+      for (const point of points) {
+        const x = Math.floor(xFor(pointTime(point)));
+        const existing = buckets.get(x);
+        if (!existing) {
+          buckets.set(x, { first: point, min: point, max: point, last: point });
+        } else {
+          if (point.price < existing.min.price) existing.min = point;
+          if (point.price > existing.max.price) existing.max = point;
+          existing.last = point;
+        }
+      }
+      const out = [];
+      for (const bucket of buckets.values()) {
+        out.push(bucket.first, bucket.min, bucket.max, bucket.last);
+      }
+      out.sort((a, b) => pointTime(a) - pointTime(b));
+      return out;
+    }
+
+    function drawLatestPrice(point, xFor, yFor, color, label) {
+      if (!point) return;
+      const y = yFor(point.price);
+      const width = canvas.getBoundingClientRect().width;
+      ctx.save();
+      ctx.strokeStyle = color;
+      ctx.globalAlpha = 0.42;
+      ctx.setLineDash([4, 4]);
+      ctx.beginPath();
+      ctx.moveTo(72, y);
+      ctx.lineTo(width - 84, y);
+      ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.globalAlpha = 1;
+      ctx.fillStyle = color;
+      ctx.fillRect(width - 76, y - 11, 66, 22);
+      ctx.fillStyle = "#071018";
+      ctx.font = "700 11px Segoe UI, sans-serif";
+      ctx.fillText(`${label} ${formatPrice(point.price)}`, width - 72, y + 4);
+      ctx.restore();
+    }
+
+    function drawCrosshair(xFor, yFor, data, minP, maxP, pad, plotW, plotH) {
+      if (!state.mouse) {
+        tooltip.style.display = "none";
+        return;
+      }
+      const { x, y } = state.mouse;
+      if (x < pad.left || x > pad.left + plotW || y < pad.top || y > pad.top + plotH) {
+        tooltip.style.display = "none";
+        return;
+      }
+
+      const t = state.viewStart + ((x - pad.left) / plotW) * (state.viewEnd - state.viewStart);
+      const spot = nearestPoint(data.spot, t);
+      const perp = nearestPoint(data.perp, t);
+
+      ctx.save();
+      ctx.strokeStyle = "rgba(230, 237, 243, 0.28)";
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(x, pad.top);
+      ctx.lineTo(x, pad.top + plotH);
+      ctx.moveTo(pad.left, y);
+      ctx.lineTo(pad.left + plotW, y);
+      ctx.stroke();
+      ctx.restore();
+
+      const priceAtY = maxP - ((y - pad.top) / plotH) * (maxP - minP);
+      const lines = [
+        `<b>${formatDateTime(t)}</b>`,
+        `Y ${formatPrice(priceAtY)}`,
+      ];
+      if (spot) lines.push(`<span style="color:${getCss("--spot")}">Spot</span> ${formatPrice(spot.price)} delay ${spot.delayMs}ms`);
+      if (perp) lines.push(`<span style="color:${getCss("--perp")}">Perp</span> ${formatPrice(perp.price)} delay ${perp.delayMs}ms`);
+      if (spot && perp) {
+        const lead = spot.receiveTimeMs - perp.receiveTimeMs;
+        if (Math.abs(lead) <= 1000) {
+          lines.push(lead > 0 ? `Perp earlier by ${lead}ms` : `Spot earlier by ${Math.abs(lead)}ms`);
+        }
+      }
+      tooltip.innerHTML = lines.join("<br>");
+      tooltip.style.display = "block";
+      tooltip.style.left = `${Math.min(x + 18, window.innerWidth - 260)}px`;
+      tooltip.style.top = `${Math.max(12, y + 18)}px`;
+    }
+
+    function nearestPoint(points, targetTime) {
+      if (!points.length) return null;
+      let lo = 0;
+      let hi = points.length - 1;
+      while (lo < hi) {
+        const mid = (lo + hi) >> 1;
+        if (pointTime(points[mid]) < targetTime) lo = mid + 1;
+        else hi = mid;
+      }
+      const a = points[lo];
+      const b = points[Math.max(0, lo - 1)];
+      if (!b) return a;
+      return Math.abs(pointTime(a) - targetTime) < Math.abs(pointTime(b) - targetTime) ? a : b;
+    }
+
+    function getLatestPrices() {
+      const bucket = state.series.get(state.selectedSymbol) || { spot: [], perp: [] };
+      return {
+        spot: bucket.spot[bucket.spot.length - 1] || null,
+        perp: bucket.perp[bucket.perp.length - 1] || null,
+      };
+    }
+
+    function updateStats(latest) {
+      spotStat.textContent = latest.spot ? `${formatPrice(latest.spot.price)}  ${latest.spot.delayMs}ms` : "--";
+      perpStat.textContent = latest.perp ? `${formatPrice(latest.perp.price)}  ${latest.perp.delayMs}ms` : "--";
+      if (latest.spot && latest.perp) {
+        const spread = latest.perp.price - latest.spot.price;
+        const bps = (spread / latest.spot.price) * 10000;
+        spreadStat.textContent = `${spread >= 0 ? "+" : ""}${spread.toFixed(2)} (${bps.toFixed(1)} bps)`;
+      } else {
+        spreadStat.textContent = "--";
+      }
+
+      const move = state.latestMove.get(state.selectedSymbol);
+      if (move) {
+        const age = Date.now() - move.time;
+        const sign = move.delta > 0 ? "+" : "";
+        moveStat.textContent = `${move.venue.toUpperCase()} ${sign}${move.delta.toFixed(2)} ${age}ms ago`;
+      } else {
+        moveStat.textContent = "--";
+      }
+    }
+
+    function formatPrice(value) {
+      if (!Number.isFinite(value)) return "--";
+      if (value >= 1000) return value.toFixed(2);
+      if (value >= 1) return value.toFixed(4);
+      return value.toPrecision(6);
+    }
+
+    function formatTime(ms) {
+      const d = new Date(ms);
+      return `${pad2(d.getHours())}:${pad2(d.getMinutes())}:${pad2(d.getSeconds())}.${String(d.getMilliseconds()).padStart(3, "0")}`;
+    }
+
+    function formatDateTime(ms) {
+      const d = new Date(ms);
+      return `${pad2(d.getHours())}:${pad2(d.getMinutes())}:${pad2(d.getSeconds())}.${String(d.getMilliseconds()).padStart(3, "0")}`;
+    }
+
+    function pad2(value) {
+      return String(value).padStart(2, "0");
+    }
+
+    function getCss(name) {
+      return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+    }
+
+    symbolSelect.addEventListener("change", () => {
+      state.selectedSymbol = symbolSelect.value;
+      state.follow = true;
+      liveBtn.classList.add("active");
+    });
+
+    timeModeSelect.addEventListener("change", () => {
+      state.timeMode = timeModeSelect.value;
+      state.follow = true;
+      liveBtn.classList.add("active");
+    });
+
+    document.querySelectorAll("[data-range]").forEach((button) => {
+      button.addEventListener("click", () => {
+        state.rangeMs = Number(button.dataset.range);
+        state.follow = true;
+        liveBtn.classList.add("active");
+        document.querySelectorAll("[data-range]").forEach((b) => b.classList.toggle("active", b === button));
+      });
+    });
+
+    liveBtn.addEventListener("click", () => {
+      state.follow = true;
+      liveBtn.classList.add("active");
+    });
+
+    canvas.addEventListener("mousemove", (event) => {
+      const rect = canvas.getBoundingClientRect();
+      state.mouse = { x: event.clientX - rect.left, y: event.clientY - rect.top };
+      if (state.dragging && state.dragStartView) {
+        const dx = state.mouse.x - state.dragStartX;
+        const span = state.dragStartView.end - state.dragStartView.start;
+        const dt = (dx / rect.width) * span;
+        state.viewStart = state.dragStartView.start - dt;
+        state.viewEnd = state.dragStartView.end - dt;
+        state.follow = false;
+        liveBtn.classList.remove("active");
+      }
+    });
+
+    canvas.addEventListener("mouseleave", () => {
+      state.mouse = null;
+      state.dragging = false;
+      canvas.classList.remove("dragging");
+    });
+
+    canvas.addEventListener("mousedown", (event) => {
+      const rect = canvas.getBoundingClientRect();
+      state.dragging = true;
+      state.dragStartX = event.clientX - rect.left;
+      state.dragStartView = { start: state.viewStart, end: state.viewEnd };
+      canvas.classList.add("dragging");
+    });
+
+    window.addEventListener("mouseup", () => {
+      state.dragging = false;
+      canvas.classList.remove("dragging");
+    });
+
+    canvas.addEventListener("dblclick", () => {
+      state.follow = true;
+      liveBtn.classList.add("active");
+    });
+
+    canvas.addEventListener("wheel", (event) => {
+      event.preventDefault();
+      const rect = canvas.getBoundingClientRect();
+      const x = event.clientX - rect.left;
+      const ratio = Math.max(0, Math.min(1, x / rect.width));
+      const span = state.viewEnd - state.viewStart;
+      const factor = event.deltaY < 0 ? 0.82 : 1.22;
+      const newSpan = Math.max(1000, Math.min(30 * 60 * 1000, span * factor));
+      const anchor = state.viewStart + span * ratio;
+      state.viewStart = anchor - newSpan * ratio;
+      state.viewEnd = anchor + newSpan * (1 - ratio);
+      state.rangeMs = newSpan;
+      state.follow = false;
+      liveBtn.classList.remove("active");
+    }, { passive: false });
+
+    window.addEventListener("resize", resizeCanvas);
+    connectWs();
+    requestAnimationFrame(draw);
+  </script>
+</body>
+</html>
