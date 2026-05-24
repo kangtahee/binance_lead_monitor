@@ -277,6 +277,15 @@
       dragStartView: null,
       ws: null,
       reconnectTimer: null,
+      lastStatsUpdate: 0,
+      chartWidth: 0,
+      chartHeight: 0,
+      chartDpr: 0,
+    };
+
+    const COLORS = {
+      spot: "#f59e0b",
+      perp: "#38bdf8",
     };
 
     const canvas = document.getElementById("chart");
@@ -292,7 +301,15 @@
 
     function ensureSymbol(symbol) {
       if (!state.series.has(symbol)) {
-        state.series.set(symbol, { spot: [], perp: [] });
+        state.series.set(symbol, {
+          spot: [],
+          perp: [],
+          versions: { spot: 0, perp: 0 },
+          sorted: {
+            spot: { exchangeVersion: -1, exchange: [] },
+            perp: { exchangeVersion: -1, exchange: [] },
+          },
+        });
       }
       if (!state.symbols.includes(symbol)) {
         state.symbols.push(symbol);
@@ -336,12 +353,14 @@
         exchangeEventTimeMs: tick.exchange_event_time_ms,
         delayMs: tick.exchange_to_receive_ms,
         tradeId: tick.trade_id,
+        clientArriveMs: Date.now(),
       };
 
       venueSeries.push(point);
       if (venueSeries.length > MAX_POINTS) {
         venueSeries.splice(0, venueSeries.length - MAX_POINTS);
       }
+      bucket.versions[tick.venue]++;
 
       if (!prev || prev.price !== point.price) {
         state.latestMove.set(tick.symbol, {
@@ -387,57 +406,101 @@
     }
 
     function resizeCanvas() {
-      const rect = canvas.getBoundingClientRect();
+      const widthCss = Math.max(1, canvas.clientWidth);
+      const heightCss = Math.max(1, canvas.clientHeight);
       const dpr = window.devicePixelRatio || 1;
-      const width = Math.max(1, Math.floor(rect.width * dpr));
-      const height = Math.max(1, Math.floor(rect.height * dpr));
+      const width = Math.max(1, Math.floor(widthCss * dpr));
+      const height = Math.max(1, Math.floor(heightCss * dpr));
       if (canvas.width !== width || canvas.height !== height) {
         canvas.width = width;
         canvas.height = height;
       }
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      state.chartWidth = widthCss;
+      state.chartHeight = heightCss;
+      state.chartDpr = dpr;
     }
 
     function getVisibleData() {
-      const bucket = state.series.get(state.selectedSymbol) || { spot: [], perp: [] };
-      const spot = bucket.spot.filter((p) => {
-        const t = pointTime(p);
-        return t >= state.viewStart && t <= state.viewEnd;
-      });
-      const perp = bucket.perp.filter((p) => {
-        const t = pointTime(p);
-        return t >= state.viewStart && t <= state.viewEnd;
-      });
-      return { spot: sortByPointTime(spot), perp: sortByPointTime(perp) };
+      return {
+        spot: visibleRange("spot"),
+        perp: visibleRange("perp"),
+      };
     }
 
-    function sortByPointTime(points) {
-      return points.slice().sort((a, b) => {
-        const timeDiff = pointTime(a) - pointTime(b);
-        if (timeDiff !== 0) return timeDiff;
-        return a.receiveTimeMs - b.receiveTimeMs;
-      });
+    function visibleRange(venue) {
+      const points = getSeriesInTimeOrder(venue);
+      const start = lowerBoundTime(points, state.viewStart);
+      const end = upperBoundTime(points, state.viewEnd);
+      return { points, start, end };
+    }
+
+    function getSeriesInTimeOrder(venue) {
+      const bucket = state.series.get(state.selectedSymbol);
+      if (!bucket) return [];
+      if (state.timeMode === "receive") return bucket[venue];
+
+      const cache = bucket.sorted[venue];
+      const version = bucket.versions[venue];
+      if (cache.exchangeVersion !== version) {
+        cache.exchange = bucket[venue].slice().sort((a, b) => {
+          const timeDiff = a.exchangeTradeTimeMs - b.exchangeTradeTimeMs;
+          if (timeDiff !== 0) return timeDiff;
+          return a.receiveTimeMs - b.receiveTimeMs;
+        });
+        cache.exchangeVersion = version;
+      }
+      return cache.exchange;
+    }
+
+    function lowerBoundTime(points, target) {
+      let lo = 0;
+      let hi = points.length;
+      while (lo < hi) {
+        const mid = (lo + hi) >> 1;
+        if (pointTime(points[mid]) < target) lo = mid + 1;
+        else hi = mid;
+      }
+      return lo;
+    }
+
+    function upperBoundTime(points, target) {
+      let lo = 0;
+      let hi = points.length;
+      while (lo < hi) {
+        const mid = (lo + hi) >> 1;
+        if (pointTime(points[mid]) <= target) lo = mid + 1;
+        else hi = mid;
+      }
+      return lo;
     }
 
     function updateView() {
       if (!state.selectedSymbol) return;
-      const bucket = state.series.get(state.selectedSymbol);
-      const all = bucket ? bucket.spot.concat(bucket.perp) : [];
-      const latestPoint = all.reduce((max, point) => Math.max(max, pointTime(point)), 0);
-      const now = latestPoint || Date.now();
       if (state.follow || state.viewEnd === 0) {
+        const anchor = getLatestAnchorPoint();
+        const extraMs = anchor ? Math.min(Math.max(0, Date.now() - anchor.clientArriveMs), 1000) : 0;
+        const now = anchor ? pointTime(anchor) + extraMs : Date.now();
         state.viewEnd = now;
         state.viewStart = now - state.rangeMs;
       }
+    }
+
+    function getLatestAnchorPoint() {
+      const latest = getLatestPrices();
+      const spotTime = latest.spot ? pointTime(latest.spot) : 0;
+      const perpTime = latest.perp ? pointTime(latest.perp) : 0;
+      if (!latest.spot) return latest.perp;
+      if (!latest.perp) return latest.spot;
+      return spotTime >= perpTime ? latest.spot : latest.perp;
     }
 
     function draw() {
       resizeCanvas();
       updateView();
 
-      const rect = canvas.getBoundingClientRect();
-      const width = rect.width;
-      const height = rect.height;
+      const width = state.chartWidth || canvas.clientWidth;
+      const height = state.chartHeight || canvas.clientHeight;
       ctx.clearRect(0, 0, width, height);
 
       const pad = { left: 72, right: 84, top: 44, bottom: 38 };
@@ -452,13 +515,10 @@
       }
 
       const data = getVisibleData();
-      const prices = data.spot.concat(data.perp).map((p) => p.price);
       const latestPrices = getLatestPrices();
-      if (latestPrices.spot) prices.push(latestPrices.spot.price);
-      if (latestPrices.perp) prices.push(latestPrices.perp.price);
-
-      let minP = prices.length ? Math.min(...prices) : 0;
-      let maxP = prices.length ? Math.max(...prices) : 1;
+      const bounds = priceBounds(data, latestPrices);
+      let minP = bounds.min;
+      let maxP = bounds.max;
       if (minP === maxP) {
         minP -= minP * 0.0005 || 1;
         maxP += maxP * 0.0005 || 1;
@@ -471,14 +531,48 @@
       const yFor = (price) => pad.top + ((maxP - price) / (maxP - minP)) * plotH;
 
       drawGrid(width, height, pad, plotW, plotH, minP, maxP);
-      drawSeries(data.spot, xFor, yFor, getCss("--spot"));
-      drawSeries(data.perp, xFor, yFor, getCss("--perp"));
-      drawLatestPrice(latestPrices.spot, xFor, yFor, getCss("--spot"), "SPOT");
-      drawLatestPrice(latestPrices.perp, xFor, yFor, getCss("--perp"), "PERP");
+      drawSeries(data.spot, xFor, yFor, COLORS.spot);
+      drawSeries(data.perp, xFor, yFor, COLORS.perp);
+      drawLatestPrice(latestPrices.spot, xFor, yFor, COLORS.spot, "SPOT");
+      drawLatestPrice(latestPrices.perp, xFor, yFor, COLORS.perp, "PERP");
       drawCrosshair(xFor, yFor, data, minP, maxP, pad, plotW, plotH);
-      updateStats(latestPrices);
+      if (performance.now() - state.lastStatsUpdate > 100) {
+        updateStats(latestPrices);
+        state.lastStatsUpdate = performance.now();
+      }
 
       requestAnimationFrame(draw);
+    }
+
+    function priceBounds(data, latestPrices) {
+      let min = Infinity;
+      let max = -Infinity;
+      scanRange(data.spot, (point) => {
+        if (point.price < min) min = point.price;
+        if (point.price > max) max = point.price;
+      });
+      scanRange(data.perp, (point) => {
+        if (point.price < min) min = point.price;
+        if (point.price > max) max = point.price;
+      });
+      if (latestPrices.spot) {
+        min = Math.min(min, latestPrices.spot.price);
+        max = Math.max(max, latestPrices.spot.price);
+      }
+      if (latestPrices.perp) {
+        min = Math.min(min, latestPrices.perp.price);
+        max = Math.max(max, latestPrices.perp.price);
+      }
+      if (!Number.isFinite(min) || !Number.isFinite(max)) {
+        return { min: 0, max: 1 };
+      }
+      return { min, max };
+    }
+
+    function scanRange(range, visitor) {
+      for (let i = range.start; i < range.end; i++) {
+        visitor(range.points[i]);
+      }
     }
 
     function drawGrid(width, height, pad, plotW, plotH, minP, maxP) {
@@ -514,24 +608,29 @@
       ctx.restore();
     }
 
-    function drawSeries(points, xFor, yFor, color) {
-      if (!points.length) return;
+    function drawSeries(range, xFor, yFor, color) {
+      const count = range.end - range.start;
+      if (count <= 0) return;
       ctx.save();
       ctx.strokeStyle = color;
       ctx.lineWidth = 1.6;
       ctx.beginPath();
 
-      const decimated = decimate(points, xFor);
-      for (let i = 0; i < decimated.length; i++) {
-        const p = decimated[i];
+      const decimated = count > 2500 ? decimate(range, xFor) : null;
+      const drawable = decimated || range.points;
+      const start = decimated ? 0 : range.start;
+      const end = decimated ? decimated.length : range.end;
+
+      for (let i = start; i < end; i++) {
+        const p = drawable[i];
         const x = xFor(pointTime(p));
         const y = yFor(p.price);
-        if (i === 0) ctx.moveTo(x, y);
+        if (i === start) ctx.moveTo(x, y);
         else ctx.lineTo(x, y);
       }
       ctx.stroke();
 
-      const last = points[points.length - 1];
+      const last = range.points[range.end - 1];
       ctx.fillStyle = color;
       ctx.beginPath();
       ctx.arc(xFor(pointTime(last)), yFor(last.price), 3, 0, Math.PI * 2);
@@ -539,14 +638,14 @@
       ctx.restore();
     }
 
-    function decimate(points, xFor) {
-      if (points.length < 2500) return points;
+    function decimate(range, xFor) {
       const out = [];
       let currentX = null;
       let first = null;
       let last = null;
 
-      for (const point of points) {
+      for (let i = range.start; i < range.end; i++) {
+        const point = range.points[i];
         const x = Math.floor(xFor(pointTime(point)));
         if (currentX === null || x !== currentX) {
           if (first) {
@@ -621,8 +720,8 @@
         `<b>${formatDateTime(t)}</b>`,
         `Y ${formatPrice(priceAtY)}`,
       ];
-      if (spot) lines.push(`<span style="color:${getCss("--spot")}">Spot</span> ${formatPrice(spot.price)} delay ${spot.delayMs}ms`);
-      if (perp) lines.push(`<span style="color:${getCss("--perp")}">Perp</span> ${formatPrice(perp.price)} delay ${perp.delayMs}ms`);
+      if (spot) lines.push(`<span style="color:${COLORS.spot}">Spot</span> ${formatPrice(spot.price)} delay ${spot.delayMs}ms`);
+      if (perp) lines.push(`<span style="color:${COLORS.perp}">Perp</span> ${formatPrice(perp.price)} delay ${perp.delayMs}ms`);
       if (spot && perp) {
         const lead = spot.receiveTimeMs - perp.receiveTimeMs;
         if (Math.abs(lead) <= 1000) {
@@ -635,17 +734,17 @@
       tooltip.style.top = `${Math.max(12, y + 18)}px`;
     }
 
-    function nearestPoint(points, targetTime) {
-      if (!points.length) return null;
-      let lo = 0;
-      let hi = points.length - 1;
+    function nearestPoint(range, targetTime) {
+      if (range.end <= range.start) return null;
+      let lo = range.start;
+      let hi = range.end - 1;
       while (lo < hi) {
         const mid = (lo + hi) >> 1;
-        if (pointTime(points[mid]) < targetTime) lo = mid + 1;
+        if (pointTime(range.points[mid]) < targetTime) lo = mid + 1;
         else hi = mid;
       }
-      const a = points[lo];
-      const b = points[Math.max(0, lo - 1)];
+      const a = range.points[lo];
+      const b = range.points[Math.max(range.start, lo - 1)];
       if (!b) return a;
       return Math.abs(pointTime(a) - targetTime) < Math.abs(pointTime(b) - targetTime) ? a : b;
     }
