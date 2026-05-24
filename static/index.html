@@ -27,13 +27,14 @@
       background: radial-gradient(circle at top left, #182235 0, var(--bg) 36rem);
       color: var(--text);
       font-family: "Segoe UI", "Helvetica Neue", Arial, sans-serif;
-      overflow: hidden;
+      overflow-x: hidden;
+      overflow-y: auto;
     }
 
     .app {
-      height: 100vh;
+      min-height: 100vh;
       display: grid;
-      grid-template-rows: auto minmax(320px, 1fr) 270px;
+      grid-template-rows: auto clamp(420px, 58vh, 680px) auto;
       padding: 14px;
       gap: 12px;
     }
@@ -187,8 +188,6 @@
     }
 
     .events {
-      min-height: 0;
-      overflow: hidden;
       display: grid;
       grid-template-rows: auto 1fr;
     }
@@ -212,7 +211,7 @@
     }
 
     .table-wrap {
-      overflow: auto;
+      overflow: visible;
     }
 
     table {
@@ -231,9 +230,6 @@
     }
 
     th {
-      position: sticky;
-      top: 0;
-      z-index: 1;
       color: var(--muted);
       background: #121922;
       font-weight: 700;
@@ -271,9 +267,9 @@
     @media (max-width: 900px) {
       body { overflow: auto; }
       .app {
-        height: 100svh;
+        min-height: 100svh;
         padding: 8px;
-        grid-template-rows: auto 520px 320px;
+        grid-template-rows: auto 520px auto;
       }
       .toolbar {
         align-items: flex-start;
