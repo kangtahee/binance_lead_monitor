@@ -844,18 +844,30 @@ async fn handle_invalid_tick(
     tx: &broadcast::Sender<String>,
     shared: &Arc<RwLock<SharedData>>,
 ) -> Result<()> {
-    warn!(
-        "[{}] raw invalid tick: symbol={} reason={} raw_price={} raw_quantity={} trade_id={} exchange_time={} receive_time={} raw={}",
-        invalid.venue,
-        invalid.symbol,
-        invalid.reason,
-        invalid.raw_price,
-        invalid.raw_quantity,
-        invalid.trade_id,
-        invalid.exchange_time_ms,
-        invalid.receive_time_ms,
-        invalid.raw,
-    );
+    if log_invalid_ticks_enabled() {
+        warn!(
+            "[{}] raw invalid tick: symbol={} reason={} raw_price={} raw_quantity={} trade_id={} exchange_time={} receive_time={} raw={}",
+            invalid.venue,
+            invalid.symbol,
+            invalid.reason,
+            invalid.raw_price,
+            invalid.raw_quantity,
+            invalid.trade_id,
+            invalid.exchange_time_ms,
+            invalid.receive_time_ms,
+            invalid.raw,
+        );
+    } else {
+        debug!(
+            "[{}] ignored invalid tick: symbol={} reason={} raw_price={} raw_quantity={} trade_id={}",
+            invalid.venue,
+            invalid.symbol,
+            invalid.reason,
+            invalid.raw_price,
+            invalid.raw_quantity,
+            invalid.trade_id,
+        );
+    }
 
     {
         let mut shared = shared.write().await;
@@ -866,6 +878,12 @@ async fn handle_invalid_tick(
     let msg = serde_json::to_string(&invalid).context("encode invalid tick")?;
     let _ = tx.send(msg);
     Ok(())
+}
+
+fn log_invalid_ticks_enabled() -> bool {
+    env::var("LEAD_MONITOR_LOG_INVALID_TICKS")
+        .map(|value| matches!(value.trim().to_ascii_lowercase().as_str(), "1" | "true" | "yes" | "on"))
+        .unwrap_or(false)
 }
 
 async fn handle_valid_trade(
