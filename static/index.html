@@ -345,14 +345,21 @@
       const bucket = state.series.get(tick.symbol);
       const venueSeries = bucket[tick.venue];
       const prev = venueSeries.length ? venueSeries[venueSeries.length - 1] : null;
+      const price = Number(tick.price);
+      if (!Number.isFinite(price) || price <= 0) {
+        console.warn("invalid incoming trade price", tick);
+      }
       const point = {
-        price: tick.price,
-        quantity: tick.quantity,
+        price,
+        rawPrice: tick.raw_price,
+        quantity: Number(tick.quantity),
+        rawQuantity: tick.raw_quantity,
         receiveTimeMs: tick.receive_time_ms,
         exchangeTradeTimeMs: tick.exchange_trade_time_ms,
         exchangeEventTimeMs: tick.exchange_event_time_ms,
         delayMs: tick.exchange_to_receive_ms,
         tradeId: tick.trade_id,
+        stream: tick.stream,
         clientArriveMs: Date.now(),
       };
 
@@ -366,6 +373,7 @@
         state.latestMove.set(tick.symbol, {
           venue: tick.venue,
           price: point.price,
+          rawPrice: point.rawPrice,
           time: point.receiveTimeMs,
           delta: prev ? point.price - prev.price : 0,
         });
@@ -759,7 +767,7 @@
 
     function updateStats(latest) {
       spotStat.textContent = latest.spot ? `${formatPrice(latest.spot.price)}  ${latest.spot.delayMs}ms` : "--";
-      perpStat.textContent = latest.perp ? `${formatPrice(latest.perp.price)}  ${latest.perp.delayMs}ms` : "--";
+      perpStat.textContent = latest.perp ? `${formatPrice(latest.perp.price)}  ${latest.perp.delayMs}ms raw=${latest.perp.rawPrice ?? "?"}` : "--";
       if (latest.spot && latest.perp) {
         const spread = latest.perp.price - latest.spot.price;
         const bps = (spread / latest.spot.price) * 10000;
@@ -772,7 +780,7 @@
       if (move) {
         const age = Date.now() - move.time;
         const sign = move.delta > 0 ? "+" : "";
-        moveStat.textContent = `${move.venue.toUpperCase()} ${sign}${move.delta.toFixed(2)} ${age}ms ago`;
+        moveStat.textContent = `${move.venue.toUpperCase()} ${sign}${move.delta.toFixed(2)} raw=${move.rawPrice ?? "?"} ${age}ms ago`;
       } else {
         moveStat.textContent = "--";
       }

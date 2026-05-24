@@ -53,8 +53,11 @@ struct TradeTick {
     symbol: String,
     asset: String,
     venue: &'static str,
+    stream: String,
     price: f64,
+    raw_price: String,
     quantity: f64,
+    raw_quantity: String,
     trade_id: u64,
     exchange_event_time_ms: i64,
     exchange_trade_time_ms: i64,
@@ -79,6 +82,7 @@ struct AppState {
 
 #[derive(Debug, Deserialize)]
 struct CombinedTrade {
+    stream: String,
     data: RawTrade,
 }
 
@@ -303,8 +307,11 @@ async fn handle_trade_message(
         asset: asset_from_symbol(&symbol),
         symbol: symbol.clone(),
         venue: venue.as_str(),
+        stream: parsed.stream,
         price,
+        raw_price: parsed.data.price,
         quantity,
+        raw_quantity: parsed.data.quantity,
         trade_id: parsed.data.trade_id,
         exchange_event_time_ms: parsed.data.event_time_ms,
         exchange_trade_time_ms: parsed.data.trade_time_ms,
@@ -341,10 +348,26 @@ fn asset_from_symbol(symbol: &str) -> String {
 }
 
 fn log_large_raw_move(venue: Venue, previous_price: Option<f64>, tick: &TradeTick, raw_text: &str) {
+    if !tick.price.is_finite() || tick.price <= 0.0 {
+        warn!(
+            "[{}] raw invalid price: symbol={} price={:.12} raw_price={} trade_id={} event_time={} trade_time={} receive_time={} raw={}",
+            venue.as_str(),
+            tick.symbol,
+            tick.price,
+            tick.raw_price,
+            tick.trade_id,
+            tick.exchange_event_time_ms,
+            tick.exchange_trade_time_ms,
+            tick.receive_time_ms,
+            raw_text,
+        );
+        return;
+    }
+
     let Some(previous_price) = previous_price else {
         return;
     };
-    if previous_price <= 0.0 || tick.price <= 0.0 {
+    if previous_price <= 0.0 {
         return;
     }
 
