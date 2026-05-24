@@ -316,6 +316,11 @@ async fn handle_trade_message(
     {
         let mut latest = latest.write().await;
         let entry = latest.entry(symbol).or_default();
+        let previous_price = match venue {
+            Venue::Spot => entry.spot.as_ref().map(|tick| tick.price),
+            Venue::Perp => entry.perp.as_ref().map(|tick| tick.price),
+        };
+        log_large_raw_move(venue, previous_price, &tick, text);
         match venue {
             Venue::Spot => entry.spot = Some(tick.clone()),
             Venue::Perp => entry.perp = Some(tick.clone()),
@@ -333,6 +338,34 @@ fn asset_from_symbol(symbol: &str) -> String {
         .strip_suffix("USDT")
         .unwrap_or(symbol)
         .to_ascii_uppercase()
+}
+
+fn log_large_raw_move(venue: Venue, previous_price: Option<f64>, tick: &TradeTick, raw_text: &str) {
+    let Some(previous_price) = previous_price else {
+        return;
+    };
+    if previous_price <= 0.0 || tick.price <= 0.0 {
+        return;
+    }
+
+    let pct_move = ((tick.price - previous_price) / previous_price).abs();
+    if pct_move < 0.01 {
+        return;
+    }
+
+    warn!(
+        "[{}] raw large move: symbol={} prev={:.8} price={:.8} move={:.4}% trade_id={} event_time={} trade_time={} receive_time={} raw={}",
+        venue.as_str(),
+        tick.symbol,
+        previous_price,
+        tick.price,
+        pct_move * 100.0,
+        tick.trade_id,
+        tick.exchange_event_time_ms,
+        tick.exchange_trade_time_ms,
+        tick.receive_time_ms,
+        raw_text,
+    );
 }
 
 fn now_ms() -> i64 {

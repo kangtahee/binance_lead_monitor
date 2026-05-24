@@ -408,7 +408,15 @@
         const t = pointTime(p);
         return t >= state.viewStart && t <= state.viewEnd;
       });
-      return { spot, perp };
+      return { spot: sortByPointTime(spot), perp: sortByPointTime(perp) };
+    }
+
+    function sortByPointTime(points) {
+      return points.slice().sort((a, b) => {
+        const timeDiff = pointTime(a) - pointTime(b);
+        if (timeDiff !== 0) return timeDiff;
+        return a.receiveTimeMs - b.receiveTimeMs;
+      });
     }
 
     function updateView() {
@@ -533,23 +541,30 @@
 
     function decimate(points, xFor) {
       if (points.length < 2500) return points;
-      const buckets = new Map();
+      const out = [];
+      let currentX = null;
+      let first = null;
+      let last = null;
+
       for (const point of points) {
         const x = Math.floor(xFor(pointTime(point)));
-        const existing = buckets.get(x);
-        if (!existing) {
-          buckets.set(x, { first: point, min: point, max: point, last: point });
+        if (currentX === null || x !== currentX) {
+          if (first) {
+            out.push(first);
+            if (last !== first) out.push(last);
+          }
+          currentX = x;
+          first = point;
+          last = point;
         } else {
-          if (point.price < existing.min.price) existing.min = point;
-          if (point.price > existing.max.price) existing.max = point;
-          existing.last = point;
+          last = point;
         }
       }
-      const out = [];
-      for (const bucket of buckets.values()) {
-        out.push(bucket.first, bucket.min, bucket.max, bucket.last);
+
+      if (first) {
+        out.push(first);
+        if (last !== first) out.push(last);
       }
-      out.sort((a, b) => pointTime(a) - pointTime(b));
       return out;
     }
 
